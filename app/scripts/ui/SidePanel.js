@@ -4,16 +4,17 @@
  * Right-side character/scene panel.
  *
  * PORTRAIT RENDERING
- *   - If the current stage has an `objectURL` (real image from GalleryLoader),
- *     a Phaser Image is displayed and crossfaded on stage advance.
- *   - If only a `color` exists (mock data), falls back to a coloured rectangle.
+ *   Phaser's XHR-based loader cannot handle blob:// URLs produced by
+ *   URL.createObjectURL(). Instead we create an HTMLImageElement, wait for
+ *   it to load, then call scene.textures.addImage() to register it
+ *   directly. This works reliably with the File System Access API.
  *
- * DEPTH LAYERS (assigned explicitly to avoid draw-order bugs):
+ * DEPTH LAYERS
  *   0  panel background + accent stripe
- *   1  portrait image / portrait bg rect
- *   2  portrait vignette overlay
- *   3  stage dots
- *   4  all text and UI chrome
+ *   10 portrait image / portrait bg rect
+ *   20 portrait vignette overlay
+ *   30 stage dots
+ *   40 all text and UI chrome
  */
 
 var PANEL_X      = 370;
@@ -40,12 +41,11 @@ var COLOR_TEXT_PRIMARY  = '#e8e8f0';
 var COLOR_TEXT_MUTED    = '#9090b0';
 var COLOR_TEXT_ACCENT   = '#c96f84';
 
-// Depth constants — everything uses these so layering is always predictable
-var DEPTH_BG        = 0;
-var DEPTH_PORTRAIT  = 10;
-var DEPTH_VIGNETTE  = 20;
-var DEPTH_DOTS      = 30;
-var DEPTH_UI        = 40;
+var DEPTH_BG       = 0;
+var DEPTH_PORTRAIT = 10;
+var DEPTH_VIGNETTE = 20;
+var DEPTH_DOTS     = 30;
+var DEPTH_UI       = 40;
 
 export var PANEL_X_EXPORT      = PANEL_X;
 export var PANEL_WIDTH_EXPORT  = PANEL_WIDTH;
@@ -64,7 +64,7 @@ export default class SidePanel {
     this.refresh();
   }
 
-  // ── Public API ─────────────────────────────────────────────────────────
+  // ── Public API ────────────────────────────────────────────────────────
 
   showDialogue(text) {
     this._dialogueText.setText('"' + text + '"');
@@ -118,7 +118,7 @@ export default class SidePanel {
     }
   }
 
-  // ── Private ───────────────────────────────────────────────────────────────
+  // ── Private ─────────────────────────────────────────────────────────────
 
   _refreshPortrait(stageData) {
     var px   = PANEL_X + PANEL_PAD;
@@ -130,18 +130,16 @@ export default class SidePanel {
     if (stageData.objectURL) {
       var textureKey = 'portrait_' + this.progressManager.currentStage + '_' + this.sceneData.id;
 
-      var applyImage = function() {
-        // Destroy the old portrait image if one exists
+      var applyTexture = function(key) {
         if (self._portraitImage) {
           self._portraitImage.destroy();
           self._portraitImage = null;
         }
-        // Clear the placeholder rect
         self._portraitBg.clear();
 
-        var img = self.scene.add.image(px + pw / 2, py + ph / 2, textureKey);
+        var img = self.scene.add.image(px + pw / 2, py + ph / 2, key);
 
-        // Scale to fill the portrait area (cover, not contain)
+        // Cover-fit: scale so the image fills the portrait area
         var scaleX = pw / img.width;
         var scaleY = ph / img.height;
         img.setScale(Math.max(scaleX, scaleY));
@@ -152,20 +150,31 @@ export default class SidePanel {
         maskShape.fillRoundedRect(px, py, pw, ph, 8);
         img.setMask(maskShape.createGeometryMask());
 
-        // Sit at DEPTH_PORTRAIT so it is above bg but below vignette/dots/text
         img.setDepth(DEPTH_PORTRAIT);
-
         img.setAlpha(0);
         self.scene.tweens.add({ targets: img, alpha: 1, duration: 500, ease: 'Sine.easeIn' });
         self._portraitImage = img;
       };
 
       if (this.scene.textures.exists(textureKey)) {
-        applyImage();
+        // Already registered in a previous call — use it immediately
+        applyTexture(textureKey);
       } else {
-        this.scene.load.image(textureKey, stageData.objectURL);
-        this.scene.load.once('complete', applyImage);
-        this.scene.load.start();
+        // blob:// URLs cannot go through Phaser's XHR loader.
+        // Create a native HTMLImageElement, wait for it to load,
+        // then register the texture directly via textures.addImage().
+        var htmlImg = new Image();
+        htmlImg.onload = function() {
+          self.scene.textures.addImage(textureKey, htmlImg);
+          applyTexture(textureKey);
+        };
+        htmlImg.onerror = function() {
+          // Fallback to a dark placeholder if the image fails
+          self._portraitBg.clear();
+          self._portraitBg.fillStyle(0x2a2a4a, 1);
+          self._portraitBg.fillRoundedRect(px, py, pw, ph, 8);
+        };
+        htmlImg.src = stageData.objectURL;
       }
 
     } else {
@@ -203,25 +212,25 @@ export default class SidePanel {
     var ph  = PANEL_HEIGHT;
     var pad = PANEL_PAD;
 
-    // Panel background (DEPTH_BG)
+    // Panel background
     s.add.graphics().setDepth(DEPTH_BG)
       .fillStyle(COLOR_PANEL_BG, 1)
       .fillRect(px, 0, pw, ph);
 
-    // Left-edge accent stripe (DEPTH_BG)
+    // Left-edge accent stripe
     s.add.graphics().setDepth(DEPTH_BG)
       .fillStyle(COLOR_PROGRESS_FILL, 0.6)
       .fillRect(px, 0, 2, ph);
 
-    // Portrait placeholder (DEPTH_PORTRAIT) — cleared once a real image loads
+    // Portrait placeholder rect (cleared once a real image loads)
     this._portraitBg = s.add.graphics().setDepth(DEPTH_PORTRAIT);
 
-    // Portrait vignette overlay (DEPTH_VIGNETTE) — always on top of the image
+    // Portrait vignette overlay (always above the image)
     s.add.graphics().setDepth(DEPTH_VIGNETTE)
       .fillStyle(0x000000, 0.18)
       .fillRoundedRect(px + pad, pad, pw - pad * 2, PORTRAIT_HEIGHT, 8);
 
-    // Stage dots (DEPTH_DOTS)
+    // Stage progress dots
     this._stageDots  = [];
     var dotCount     = this.progressManager.totalStages;
     var dotSpacing   = 18;
@@ -233,14 +242,14 @@ export default class SidePanel {
       this._stageDots.push(dot);
     }
 
-    // Name (DEPTH_UI)
+    // Name
     this._nameText = s.add.text(
       px + pad, NAME_Y,
       this.sceneData.name + '  \u00b7  ' + this.sceneData.location,
       { fontFamily: 'Georgia, serif', fontSize: '18px', color: COLOR_TEXT_PRIMARY, fontStyle: 'bold' }
     ).setDepth(DEPTH_UI);
 
-    // Bio (DEPTH_UI)
+    // Bio
     this._bioText = s.add.text(
       px + pad, BIO_Y,
       this.sceneData.bio,
@@ -248,33 +257,33 @@ export default class SidePanel {
         wordWrap: { width: pw - pad * 2 } }
     ).setDepth(DEPTH_UI);
 
-    // Divider (DEPTH_UI)
+    // Divider
     s.add.graphics().setDepth(DEPTH_UI)
       .fillStyle(COLOR_DIVIDER, 1)
       .fillRect(px + pad, DIVIDER_Y, pw - pad * 2, 1);
 
-    // Progress bar background (DEPTH_UI)
+    // Progress bar background
     s.add.graphics().setDepth(DEPTH_UI)
       .fillStyle(COLOR_PROGRESS_BG, 1)
       .fillRoundedRect(px + pad, PROGRESS_Y, pw - pad * 2, PROGRESS_BAR_HEIGHT, 4);
 
-    // Progress bar fill — redrawn on every refresh() (DEPTH_UI)
+    // Progress bar fill (redrawn on every refresh())
     this._progressFill = s.add.graphics().setDepth(DEPTH_UI);
 
-    // Stage label (DEPTH_UI)
+    // Stage label
     this._stageLabel = s.add.text(
       px + pad, STAGE_LABEL_Y, '',
       { fontFamily: 'Arial, sans-serif', fontSize: '11px', color: COLOR_TEXT_ACCENT }
     ).setDepth(DEPTH_UI);
 
-    // Dialogue box background (DEPTH_UI)
+    // Dialogue box background
     s.add.graphics().setDepth(DEPTH_UI)
       .fillStyle(COLOR_DIALOGUE_BG, 1)
       .fillRoundedRect(px + pad, DIALOGUE_Y, pw - pad * 2, DIALOGUE_HEIGHT, 8)
       .lineStyle(1, COLOR_DIVIDER, 1)
       .strokeRoundedRect(px + pad, DIALOGUE_Y, pw - pad * 2, DIALOGUE_HEIGHT, 8);
 
-    // "SHE SAYS" label (DEPTH_UI)
+    // "SHE SAYS" label
     s.add.text(px + pad + 10, DIALOGUE_Y + 10, 'SHE SAYS', {
       fontFamily:    'Arial, sans-serif',
       fontSize:      '9px',
@@ -282,7 +291,7 @@ export default class SidePanel {
       letterSpacing: 2
     }).setDepth(DEPTH_UI);
 
-    // Dialogue text (DEPTH_UI)
+    // Dialogue text
     this._dialogueText = s.add.text(
       px + pad + 10, DIALOGUE_Y + 28, '',
       { fontFamily: 'Georgia, serif', fontSize: '13px', color: COLOR_TEXT_PRIMARY,
