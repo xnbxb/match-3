@@ -8,7 +8,12 @@
  *     a Phaser Image is displayed and crossfaded on stage advance.
  *   - If only a `color` exists (mock data), falls back to a coloured rectangle.
  *
- * Layout constants are at the top — change them to reposition everything.
+ * DEPTH LAYERS (assigned explicitly to avoid draw-order bugs):
+ *   0  panel background + accent stripe
+ *   1  portrait image / portrait bg rect
+ *   2  portrait vignette overlay
+ *   3  stage dots
+ *   4  all text and UI chrome
  */
 
 var PANEL_X      = 370;
@@ -35,6 +40,13 @@ var COLOR_TEXT_PRIMARY  = '#e8e8f0';
 var COLOR_TEXT_MUTED    = '#9090b0';
 var COLOR_TEXT_ACCENT   = '#c96f84';
 
+// Depth constants — everything uses these so layering is always predictable
+var DEPTH_BG        = 0;
+var DEPTH_PORTRAIT  = 10;
+var DEPTH_VIGNETTE  = 20;
+var DEPTH_DOTS      = 30;
+var DEPTH_UI        = 40;
+
 export var PANEL_X_EXPORT      = PANEL_X;
 export var PANEL_WIDTH_EXPORT  = PANEL_WIDTH;
 export var PANEL_HEIGHT_EXPORT = PANEL_HEIGHT;
@@ -52,7 +64,7 @@ export default class SidePanel {
     this.refresh();
   }
 
-  // ── Public API ────────────────────────────────────────────────────────────
+  // ── Public API ─────────────────────────────────────────────────────────
 
   showDialogue(text) {
     this._dialogueText.setText('"' + text + '"');
@@ -109,31 +121,39 @@ export default class SidePanel {
   // ── Private ───────────────────────────────────────────────────────────────
 
   _refreshPortrait(stageData) {
-    var px = PANEL_X + PANEL_PAD;
-    var py = PANEL_PAD;
-    var pw = PANEL_WIDTH - PANEL_PAD * 2;
-    var ph = PORTRAIT_HEIGHT;
+    var px   = PANEL_X + PANEL_PAD;
+    var py   = PANEL_PAD;
+    var pw   = PANEL_WIDTH - PANEL_PAD * 2;
+    var ph   = PORTRAIT_HEIGHT;
+    var self = this;
 
     if (stageData.objectURL) {
       var textureKey = 'portrait_' + this.progressManager.currentStage + '_' + this.sceneData.id;
-      var self = this;
 
       var applyImage = function() {
+        // Destroy the old portrait image if one exists
         if (self._portraitImage) {
           self._portraitImage.destroy();
           self._portraitImage = null;
         }
+        // Clear the placeholder rect
         self._portraitBg.clear();
 
-        var img    = self.scene.add.image(px + pw / 2, py + ph / 2, textureKey);
+        var img = self.scene.add.image(px + pw / 2, py + ph / 2, textureKey);
+
+        // Scale to fill the portrait area (cover, not contain)
         var scaleX = pw / img.width;
         var scaleY = ph / img.height;
         img.setScale(Math.max(scaleX, scaleY));
 
+        // Clip to portrait bounds
         var maskShape = self.scene.make.graphics({ add: false });
         maskShape.fillStyle(0xffffff);
         maskShape.fillRoundedRect(px, py, pw, ph, 8);
         img.setMask(maskShape.createGeometryMask());
+
+        // Sit at DEPTH_PORTRAIT so it is above bg but below vignette/dots/text
+        img.setDepth(DEPTH_PORTRAIT);
 
         img.setAlpha(0);
         self.scene.tweens.add({ targets: img, alpha: 1, duration: 500, ease: 'Sine.easeIn' });
@@ -149,6 +169,7 @@ export default class SidePanel {
       }
 
     } else {
+      // Mock data fallback: coloured rectangle
       if (this._portraitImage) {
         this._portraitImage.destroy();
         this._portraitImage = null;
@@ -161,9 +182,8 @@ export default class SidePanel {
   }
 
   _buildPanelEntrance() {
-    // tweens.stagger() was added after Phaser 3.16 — use manual delays instead.
-    var targets  = [this._nameText, this._bioText, this._stageLabel, this._dialogueText];
-    var scene    = this.scene;
+    var targets = [this._nameText, this._bioText, this._stageLabel, this._dialogueText];
+    var scene   = this.scene;
     for (var i = 0; i < targets.length; i++) {
       targets[i].setAlpha(0);
       scene.tweens.add({
@@ -183,83 +203,90 @@ export default class SidePanel {
     var ph  = PANEL_HEIGHT;
     var pad = PANEL_PAD;
 
-    // Panel background
-    s.add.graphics().fillStyle(COLOR_PANEL_BG, 1).fillRect(px, 0, pw, ph);
+    // Panel background (DEPTH_BG)
+    s.add.graphics().setDepth(DEPTH_BG)
+      .fillStyle(COLOR_PANEL_BG, 1)
+      .fillRect(px, 0, pw, ph);
 
-    // Left-edge accent stripe
-    s.add.graphics().fillStyle(COLOR_PROGRESS_FILL, 0.6).fillRect(px, 0, 2, ph);
+    // Left-edge accent stripe (DEPTH_BG)
+    s.add.graphics().setDepth(DEPTH_BG)
+      .fillStyle(COLOR_PROGRESS_FILL, 0.6)
+      .fillRect(px, 0, 2, ph);
 
-    // Portrait area (graphics object; replaced by real image when objectURL exists)
-    this._portraitBg = s.add.graphics();
+    // Portrait placeholder (DEPTH_PORTRAIT) — cleared once a real image loads
+    this._portraitBg = s.add.graphics().setDepth(DEPTH_PORTRAIT);
 
-    // Portrait vignette overlay
-    s.add.graphics()
+    // Portrait vignette overlay (DEPTH_VIGNETTE) — always on top of the image
+    s.add.graphics().setDepth(DEPTH_VIGNETTE)
       .fillStyle(0x000000, 0.18)
       .fillRoundedRect(px + pad, pad, pw - pad * 2, PORTRAIT_HEIGHT, 8);
 
-    // Stage dots
+    // Stage dots (DEPTH_DOTS)
     this._stageDots  = [];
     var dotCount     = this.progressManager.totalStages;
     var dotSpacing   = 18;
     var dotsStartX   = px + pw / 2 - ((dotCount - 1) * dotSpacing) / 2;
     for (var i = 0; i < dotCount; i++) {
-      var dot = s.add.graphics();
+      var dot = s.add.graphics().setDepth(DEPTH_DOTS);
       dot.fillStyle(0xffffff, i === 0 ? 1 : 0.3);
       dot.fillCircle(dotsStartX + i * dotSpacing, PORTRAIT_HEIGHT - 14, 5);
       this._stageDots.push(dot);
     }
 
-    // Name
+    // Name (DEPTH_UI)
     this._nameText = s.add.text(
       px + pad, NAME_Y,
       this.sceneData.name + '  \u00b7  ' + this.sceneData.location,
       { fontFamily: 'Georgia, serif', fontSize: '18px', color: COLOR_TEXT_PRIMARY, fontStyle: 'bold' }
-    );
+    ).setDepth(DEPTH_UI);
 
-    // Bio
+    // Bio (DEPTH_UI)
     this._bioText = s.add.text(
       px + pad, BIO_Y,
       this.sceneData.bio,
       { fontFamily: 'Arial, sans-serif', fontSize: '12px', color: COLOR_TEXT_MUTED,
         wordWrap: { width: pw - pad * 2 } }
-    );
+    ).setDepth(DEPTH_UI);
 
-    // Divider
-    s.add.graphics().fillStyle(COLOR_DIVIDER, 1).fillRect(px + pad, DIVIDER_Y, pw - pad * 2, 1);
+    // Divider (DEPTH_UI)
+    s.add.graphics().setDepth(DEPTH_UI)
+      .fillStyle(COLOR_DIVIDER, 1)
+      .fillRect(px + pad, DIVIDER_Y, pw - pad * 2, 1);
 
-    // Progress bar background
-    s.add.graphics().fillStyle(COLOR_PROGRESS_BG, 1)
+    // Progress bar background (DEPTH_UI)
+    s.add.graphics().setDepth(DEPTH_UI)
+      .fillStyle(COLOR_PROGRESS_BG, 1)
       .fillRoundedRect(px + pad, PROGRESS_Y, pw - pad * 2, PROGRESS_BAR_HEIGHT, 4);
 
-    // Progress bar fill (redrawn on every refresh())
-    this._progressFill = s.add.graphics();
+    // Progress bar fill — redrawn on every refresh() (DEPTH_UI)
+    this._progressFill = s.add.graphics().setDepth(DEPTH_UI);
 
-    // Stage label
+    // Stage label (DEPTH_UI)
     this._stageLabel = s.add.text(
       px + pad, STAGE_LABEL_Y, '',
       { fontFamily: 'Arial, sans-serif', fontSize: '11px', color: COLOR_TEXT_ACCENT }
-    );
+    ).setDepth(DEPTH_UI);
 
-    // Dialogue box background
-    s.add.graphics()
+    // Dialogue box background (DEPTH_UI)
+    s.add.graphics().setDepth(DEPTH_UI)
       .fillStyle(COLOR_DIALOGUE_BG, 1)
       .fillRoundedRect(px + pad, DIALOGUE_Y, pw - pad * 2, DIALOGUE_HEIGHT, 8)
       .lineStyle(1, COLOR_DIVIDER, 1)
       .strokeRoundedRect(px + pad, DIALOGUE_Y, pw - pad * 2, DIALOGUE_HEIGHT, 8);
 
-    // "SHE SAYS" label
+    // "SHE SAYS" label (DEPTH_UI)
     s.add.text(px + pad + 10, DIALOGUE_Y + 10, 'SHE SAYS', {
       fontFamily:    'Arial, sans-serif',
       fontSize:      '9px',
       color:         COLOR_TEXT_ACCENT,
       letterSpacing: 2
-    });
+    }).setDepth(DEPTH_UI);
 
-    // Dialogue text
+    // Dialogue text (DEPTH_UI)
     this._dialogueText = s.add.text(
       px + pad + 10, DIALOGUE_Y + 28, '',
       { fontFamily: 'Georgia, serif', fontSize: '13px', color: COLOR_TEXT_PRIMARY,
         fontStyle: 'italic', wordWrap: { width: pw - pad * 2 - 20 }, lineSpacing: 4 }
-    );
+    ).setDepth(DEPTH_UI);
   }
 }
