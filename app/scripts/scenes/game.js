@@ -1,6 +1,6 @@
 import Board from '@/objects/board';
 import Block from '@/objects/block';
-import { getDefaultScene } from '@/data/mock-scenes';
+import { MOCK_SCENES } from '@/data/mock-scenes';
 import SceneProgressManager, { MATCHES_PER_STAGE } from '@/managers/SceneProgressManager';
 import DialogueManager from '@/managers/DialogueManager';
 import SidePanel from '@/ui/SidePanel';
@@ -10,60 +10,57 @@ export default class Game extends Phaser.Scene {
     super({ key: 'Game' });
   }
 
-  create(/* data */) {
-    // --- Board constants (unchanged from original) ---
-    this.NUM_ROWS = 8;
-    this.NUM_COLS = 8;
-    this.NUM_VARIATIONS = 6;
-    this.BLOCK_SIZE = 35;
-    this.ANIMATION_TIME = 300;
+  create() {
+    // Use gallery loaded in Lobby, or fall back to first mock scene.
+    const gallery   = window.__gallery || MOCK_SCENES;
+    const sceneData = gallery[0];
 
-    // Background covers the full widened canvas
-    this.background = this.add.sprite(0, 0, 'background');
-    this.background.setOrigin(0);
+    // ── Board constants (unchanged) ──────────────────────────────────────────
+    this.NUM_ROWS      = 8;
+    this.NUM_COLS      = 8;
+    this.NUM_VARIATIONS= 6;
+    this.BLOCK_SIZE    = 35;
+    this.ANIMATION_TIME= 300;
+
+    // Background
+    this.background = this.add.sprite(0, 0, 'background').setOrigin(0);
 
     // Board (logic unchanged)
-    this.board = new Board(this, this.NUM_ROWS, this.NUM_COLS, this.NUM_VARIATIONS);
-    this.blocks = this.add.group();
-    this.graphics = this.make.graphics();
+    this.board   = new Board(this, this.NUM_ROWS, this.NUM_COLS, this.NUM_VARIATIONS);
+    this.blocks  = this.add.group();
+    this.graphics= this.make.graphics();
     this.drawBoard();
 
-    // --- New systems ---
-    const sceneData = getDefaultScene();
-
+    // ── New systems ──────────────────────────────────────────────────────────
     this.progressManager = new SceneProgressManager(
       sceneData,
-      (newStageIndex, data) => this._onStageAdvance(newStageIndex, data),
-      (data) => this._onSceneComplete(data)
+      (stageIdx, data) => this._onStageAdvance(stageIdx, data),
+      (data)           => this._onSceneComplete(data)
+    );
+    this.dialogueManager = new DialogueManager(sceneData);
+    this.sidePanel       = new SidePanel(this, sceneData, this.progressManager);
+
+    // ── Score display (top-left of board area) ───────────────────────────────
+    this.score       = 0;
+    this._scoreText  = this.add.text(36, 16, 'SCORE  0', {
+      fontFamily: 'Arial, sans-serif', fontSize: '14px', color: '#9090b0'
+    });
+    this._hintText   = this.add.text(36, 36,
+      `Next stage: 0 / ${MATCHES_PER_STAGE} tiles`, {
+        fontFamily: 'Arial, sans-serif', fontSize: '11px', color: '#666688'
+      }
     );
 
-    this.dialogueManager = new DialogueManager(sceneData);
+    // Container for score pop-up texts (pooled, reused)
+    this._popupGroup = this.add.group();
 
-    this.sidePanel = new SidePanel(this, sceneData, this.progressManager);
-
-    // Score display (top-left of board area)
-    this.score = 0;
-    this._scoreText = this.add.text(36, 16, 'SCORE  0', {
-      fontFamily: 'Arial, sans-serif',
-      fontSize: '14px',
-      color: '#9090b0'
-    });
-
-    // Progress hint (below score)
-    this._hintText = this.add.text(36, 36, `Next stage: 0 / ${MATCHES_PER_STAGE} tiles`, {
-      fontFamily: 'Arial, sans-serif',
-      fontSize: '11px',
-      color: '#666688'
-    });
-
-    // Show opening dialogue after a short delay
+    // Opening dialogue
     this.time.delayedCall(600, () => {
-      const line = this.dialogueManager.getOpeningLine();
-      this.sidePanel.showDialogue(line);
+      this.sidePanel.showDialogue(this.dialogueManager.getOpeningLine());
     });
   }
 
-  // ---- Board drawing (unchanged from original) ----
+  // ── Board drawing (unchanged) ─────────────────────────────────────────────
 
   drawBoard() {
     this.graphics.fillStyle(0x000, 0.2);
@@ -113,8 +110,7 @@ export default class Game extends Phaser.Scene {
     const y = -(this.BLOCK_SIZE + 6) * this.board.RESERVE_ROW + sourceRow * (this.BLOCK_SIZE + 6);
     const block = this.createBlock(x, y, {
       asset: 'block' + this.board.grid[targetRow][col],
-      row: targetRow,
-      col: col
+      row: targetRow, col: col
     });
     const targetY = 150 + targetRow * (this.BLOCK_SIZE + 6);
     this.tweens.add({ targets: block, y: targetY, duration: this.ANIMATION_TIME, ease: 'Linear' });
@@ -122,15 +118,11 @@ export default class Game extends Phaser.Scene {
 
   swapBlocks(block1, block2) {
     this.tweens.add({
-      targets: block1,
-      x: block2.x,
-      y: block2.y,
-      duration: this.ANIMATION_TIME,
-      ease: 'Linear',
+      targets: block1, x: block2.x, y: block2.y,
+      duration: this.ANIMATION_TIME, ease: 'Linear',
       onComplete: () => {
         this.children.bringToTop(block1);
         this.board.swap(block1, block2);
-
         if (!this.isReversingSwap) {
           const chains = this.board.findAllChains();
           if (chains.length > 0) {
@@ -145,20 +137,15 @@ export default class Game extends Phaser.Scene {
         }
       }
     });
-
     this.tweens.add({
-      targets: block2,
-      x: block1.x,
-      y: block1.y,
-      duration: this.ANIMATION_TIME,
-      ease: 'Linear',
+      targets: block2, x: block1.x, y: block1.y,
+      duration: this.ANIMATION_TIME, ease: 'Linear',
       onComplete: () => { this.children.bringToTop(block2); }
     });
   }
 
   pickBlock(block) {
     if (this.isBoardBlocked) return;
-
     if (!this.selectedBlock) {
       block.setScale(1.5);
       this.selectedBlock = block;
@@ -177,31 +164,29 @@ export default class Game extends Phaser.Scene {
     this.isBoardBlocked = false;
     if (this.selectedBlock) this.selectedBlock.setScale(1);
     this.selectedBlock = null;
-    this.targetBlock = null;
+    this.targetBlock   = null;
   }
 
   updateBoard() {
-    // Count tiles being cleared for progression tracking
-    const chains = this.board.findAllChains();
-    const tilesCleared = chains.length;
+    const chains      = this.board.findAllChains();
+    const tilesCleared= chains.length;
+
+    // Flash cleared tiles before removing them
+    this._flashClearedTiles(chains);
 
     this.board.clearChains();
     this.board.updateGrid();
 
-    // Update score
-    this.score += tilesCleared * 10;
+    // Update score and show popup
+    const gained   = tilesCleared * 10;
+    this.score    += gained;
     this._scoreText.setText(`SCORE  ${this.score}`);
+    if (tilesCleared > 0) this._spawnScorePopup(gained);
 
-    // Feed cleared tile count into progress manager
+    // Feed progress
     this.progressManager.recordMatches(tilesCleared);
-
-    // Update progress hint
-    const filled = Math.floor(
-      (this.progressManager.totalMatchCount % MATCHES_PER_STAGE)
-    );
+    const filled = this.progressManager.totalMatchCount % MATCHES_PER_STAGE;
     this._hintText.setText(`Next stage: ${filled} / ${MATCHES_PER_STAGE} tiles`);
-
-    // Refresh the progress bar in the side panel
     this.sidePanel.refresh();
 
     this.time.delayedCall(this.ANIMATION_TIME, () => {
@@ -214,24 +199,77 @@ export default class Game extends Phaser.Scene {
     });
   }
 
-  // ---- Progression callbacks ----
+  // ── Visual polish ─────────────────────────────────────────────────────────
+
+  /**
+   * Briefly scale-pulse tiles that are about to be cleared.
+   * Uses the block's row/col to look up the live game object.
+   */
+  _flashClearedTiles(chains) {
+    chains.forEach(({ row, col }) => {
+      const block = this.getBlockFromColRow({ row, col });
+      if (!block) return;
+      this.tweens.add({
+        targets:  block,
+        scaleX:   1.3,
+        scaleY:   1.3,
+        alpha:    0,
+        duration: this.ANIMATION_TIME * 0.7,
+        ease:     'Sine.easeIn'
+      });
+    });
+  }
+
+  /**
+   * Spawn a floating "+N" text above the board that rises and fades.
+   * Reuses text objects from a pool to avoid GC pressure.
+   */
+  _spawnScorePopup(points) {
+    // Board centre-top
+    const x = 36 + (this.NUM_COLS / 2) * (this.BLOCK_SIZE + 6);
+    const y = 150;
+
+    let popup = this._popupGroup.getFirstDead(false);
+    if (!popup) {
+      popup = this.add.text(x, y, '', {
+        fontFamily: 'Arial Black, sans-serif',
+        fontSize:   '22px',
+        color:      '#f0d060',
+        stroke:     '#000000',
+        strokeThickness: 3
+      });
+      this._popupGroup.add(popup, true);
+    }
+    popup.setPosition(x, y);
+    popup.setText(`+${points}`);
+    popup.setAlpha(1);
+    popup.setScale(1);
+    popup.setActive(true).setVisible(true);
+
+    this.tweens.add({
+      targets:  popup,
+      y:        y - 60,
+      alpha:    0,
+      scaleX:   1.4,
+      scaleY:   1.4,
+      duration: 800,
+      ease:     'Sine.easeOut',
+      onComplete: () => { popup.setActive(false).setVisible(false); }
+    });
+  }
+
+  // ── Progression callbacks ─────────────────────────────────────────────────
 
   _onStageAdvance(newStageIndex, sceneData) {
-    // Refresh portrait color + stage dots + progress bar
     this.sidePanel.refresh();
     this.sidePanel.refreshStageDots();
-
-    // Show appropriate dialogue
-    const line = this.dialogueManager.getStageAdvanceLine(newStageIndex);
-    this.sidePanel.showDialogue(line);
-
-    // Brief camera shake for juice
+    this.sidePanel.showDialogue(
+      this.dialogueManager.getStageAdvanceLine(newStageIndex)
+    );
     this.cameras.main.shake(200, 0.005);
   }
 
   _onSceneComplete(sceneData) {
-    const line = this.dialogueManager.getWinFinalLine();
-    this.sidePanel.showDialogue(line);
-    // Future: trigger win screen or scene transition here
+    this.sidePanel.showDialogue(this.dialogueManager.getWinFinalLine());
   }
 }
