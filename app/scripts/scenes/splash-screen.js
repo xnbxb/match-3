@@ -1,10 +1,7 @@
-import { MOCK_SCENES } from '@/data/mock-scenes';
-
 export default class SplashScreen extends Phaser.Scene {
   /**
    * Loads game assets while showing the splash screen.
-   * DEBUG: bypasses Lobby and goes straight to Game with mock data
-   * so we can confirm Game itself renders correctly.
+   * After loading → transitions to Lobby (folder picker).
    *
    * @extends Phaser.Scene
    */
@@ -40,11 +37,8 @@ export default class SplashScreen extends Phaser.Scene {
   }
 
   create() {
-    // Pre-load mock gallery so Game has data regardless of Lobby.
-    window.__gallery = MOCK_SCENES;
-
     this.time.delayedCall(150, () => {
-      this.scene.start('Game');
+      this.scene.start('Lobby');
     });
   }
 
