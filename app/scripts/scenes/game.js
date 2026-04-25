@@ -16,42 +16,46 @@ export default class Game extends Phaser.Scene {
     const sceneData = gallery[0];
 
     // ── Board constants (unchanged) ──────────────────────────────────────────
-    this.NUM_ROWS      = 8;
-    this.NUM_COLS      = 8;
-    this.NUM_VARIATIONS= 6;
-    this.BLOCK_SIZE    = 35;
-    this.ANIMATION_TIME= 300;
+    this.NUM_ROWS       = 8;
+    this.NUM_COLS       = 8;
+    this.NUM_VARIATIONS = 6;
+    this.BLOCK_SIZE     = 35;
+    this.ANIMATION_TIME = 300;
 
     // Background
     this.background = this.add.sprite(0, 0, 'background').setOrigin(0);
 
     // Board (logic unchanged)
-    this.board   = new Board(this, this.NUM_ROWS, this.NUM_COLS, this.NUM_VARIATIONS);
-    this.blocks  = this.add.group();
-    this.graphics= this.make.graphics();
+    this.board    = new Board(this, this.NUM_ROWS, this.NUM_COLS, this.NUM_VARIATIONS);
+    this.blocks   = this.add.group();
+    this.graphics = this.make.graphics();
     this.drawBoard();
 
     // ── New systems ──────────────────────────────────────────────────────────
     this.progressManager = new SceneProgressManager(
       sceneData,
-      (stageIdx, data) => this._onStageAdvance(stageIdx, data),
-      (data)           => this._onSceneComplete(data)
+      (stageIdx) => this._onStageAdvance(stageIdx),
+      ()         => this._onSceneComplete()
     );
     this.dialogueManager = new DialogueManager(sceneData);
     this.sidePanel       = new SidePanel(this, sceneData, this.progressManager);
 
-    // ── Score display (top-left of board area) ───────────────────────────────
-    this.score       = 0;
-    this._scoreText  = this.add.text(36, 16, 'SCORE  0', {
-      fontFamily: 'Arial, sans-serif', fontSize: '14px', color: '#9090b0'
+    // ── Score display ────────────────────────────────────────────────────────
+    this.score      = 0;
+    this._scoreText = this.add.text(36, 16, 'SCORE  0', {
+      fontFamily: 'Arial, sans-serif',
+      fontSize:   '14px',
+      color:      '#9090b0'
     });
-    this._hintText   = this.add.text(36, 36,
+    this._hintText = this.add.text(36, 36,
       `Next stage: 0 / ${MATCHES_PER_STAGE} tiles`, {
-        fontFamily: 'Arial, sans-serif', fontSize: '11px', color: '#666688'
+        fontFamily: 'Arial, sans-serif',
+        fontSize:   '11px',
+        color:      '#666688'
       }
     );
 
-    // Container for score pop-up texts (pooled, reused)
+    // Pool for floating score pop-ups
     this._popupGroup = this.add.group();
 
     // Opening dialogue
@@ -98,7 +102,7 @@ export default class Game extends Phaser.Scene {
   }
 
   dropBlock(sourceRow, targetRow, col) {
-    const block = this.getBlockFromColRow({ row: sourceRow, col: col });
+    const block   = this.getBlockFromColRow({ row: sourceRow, col: col });
     const targetY = 150 + targetRow * (this.BLOCK_SIZE + 6);
     block.row = targetRow;
     this.children.bringToTop(block);
@@ -110,7 +114,8 @@ export default class Game extends Phaser.Scene {
     const y = -(this.BLOCK_SIZE + 6) * this.board.RESERVE_ROW + sourceRow * (this.BLOCK_SIZE + 6);
     const block = this.createBlock(x, y, {
       asset: 'block' + this.board.grid[targetRow][col],
-      row: targetRow, col: col
+      row:   targetRow,
+      col:   col
     });
     const targetY = 150 + targetRow * (this.BLOCK_SIZE + 6);
     this.tweens.add({ targets: block, y: targetY, duration: this.ANIMATION_TIME, ease: 'Linear' });
@@ -118,8 +123,11 @@ export default class Game extends Phaser.Scene {
 
   swapBlocks(block1, block2) {
     this.tweens.add({
-      targets: block1, x: block2.x, y: block2.y,
-      duration: this.ANIMATION_TIME, ease: 'Linear',
+      targets:  block1,
+      x:        block2.x,
+      y:        block2.y,
+      duration: this.ANIMATION_TIME,
+      ease:     'Linear',
       onComplete: () => {
         this.children.bringToTop(block1);
         this.board.swap(block1, block2);
@@ -138,8 +146,11 @@ export default class Game extends Phaser.Scene {
       }
     });
     this.tweens.add({
-      targets: block2, x: block1.x, y: block1.y,
-      duration: this.ANIMATION_TIME, ease: 'Linear',
+      targets:  block2,
+      x:        block1.x,
+      y:        block1.y,
+      duration: this.ANIMATION_TIME,
+      ease:     'Linear',
       onComplete: () => { this.children.bringToTop(block2); }
     });
   }
@@ -168,22 +179,19 @@ export default class Game extends Phaser.Scene {
   }
 
   updateBoard() {
-    const chains      = this.board.findAllChains();
-    const tilesCleared= chains.length;
+    const chains       = this.board.findAllChains();
+    const tilesCleared = chains.length;
 
-    // Flash cleared tiles before removing them
     this._flashClearedTiles(chains);
 
     this.board.clearChains();
     this.board.updateGrid();
 
-    // Update score and show popup
     const gained   = tilesCleared * 10;
     this.score    += gained;
     this._scoreText.setText(`SCORE  ${this.score}`);
     if (tilesCleared > 0) this._spawnScorePopup(gained);
 
-    // Feed progress
     this.progressManager.recordMatches(tilesCleared);
     const filled = this.progressManager.totalMatchCount % MATCHES_PER_STAGE;
     this._hintText.setText(`Next stage: ${filled} / ${MATCHES_PER_STAGE} tiles`);
@@ -201,10 +209,6 @@ export default class Game extends Phaser.Scene {
 
   // ── Visual polish ─────────────────────────────────────────────────────────
 
-  /**
-   * Briefly scale-pulse tiles that are about to be cleared.
-   * Uses the block's row/col to look up the live game object.
-   */
   _flashClearedTiles(chains) {
     chains.forEach(({ row, col }) => {
       const block = this.getBlockFromColRow({ row, col });
@@ -220,22 +224,17 @@ export default class Game extends Phaser.Scene {
     });
   }
 
-  /**
-   * Spawn a floating "+N" text above the board that rises and fades.
-   * Reuses text objects from a pool to avoid GC pressure.
-   */
   _spawnScorePopup(points) {
-    // Board centre-top
     const x = 36 + (this.NUM_COLS / 2) * (this.BLOCK_SIZE + 6);
     const y = 150;
 
     let popup = this._popupGroup.getFirstDead(false);
     if (!popup) {
       popup = this.add.text(x, y, '', {
-        fontFamily: 'Arial Black, sans-serif',
-        fontSize:   '22px',
-        color:      '#f0d060',
-        stroke:     '#000000',
+        fontFamily:      'Arial Black, sans-serif',
+        fontSize:        '22px',
+        color:           '#f0d060',
+        stroke:          '#000000',
         strokeThickness: 3
       });
       this._popupGroup.add(popup, true);
@@ -260,7 +259,7 @@ export default class Game extends Phaser.Scene {
 
   // ── Progression callbacks ─────────────────────────────────────────────────
 
-  _onStageAdvance(newStageIndex, sceneData) {
+  _onStageAdvance(newStageIndex) {
     this.sidePanel.refresh();
     this.sidePanel.refreshStageDots();
     this.sidePanel.showDialogue(
@@ -269,7 +268,7 @@ export default class Game extends Phaser.Scene {
     this.cameras.main.shake(200, 0.005);
   }
 
-  _onSceneComplete(sceneData) {
+  _onSceneComplete() {
     this.sidePanel.showDialogue(this.dialogueManager.getWinFinalLine());
   }
 }

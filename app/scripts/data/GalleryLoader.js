@@ -2,43 +2,32 @@
  * GalleryLoader.js
  * ----------------
  * Reads a user-selected parent folder (via Chrome's File System Access API)
- * and normalises its sub-folders into scene objects that the rest of the game
+ * and normalises its sub-folders into scene objects the rest of the game
  * already understands.
  *
  * EXPECTED FOLDER STRUCTURE:
  *   <parent>/
  *     Jane - Bedroom/
- *       scene.json          ← metadata & dialogue  (optional but recommended)
- *       01/                 ← stage folders, sorted by name
+ *       scene.json          <- metadata & dialogue (optional)
+ *       01/                 <- stage folders, sorted by name
  *         image.jpg
  *       02/
  *         image.jpg
  *     Jane - Beach/
- *       …
+ *       ...
  *
- * JSON shape (all fields optional except the folder name itself):
- *   {
- *     "bio": "…",
- *     "nationality": "FR",
- *     "dialoguefold": ["…"],
- *     "dialoguewinhand": ["…"],
- *     "dialoguewinfinal": ["…"],
- *     "handdialogue": { "1": ["…"], "2": ["…"], "3": ["…"] }
- *   }
- *
- * OUTPUT — array of scene objects matching the existing mock-scenes shape:
+ * OUTPUT - array of scene objects matching the existing mock-scenes shape:
  *   {
  *     id, name, location, bio, nationality,
- *     stages: [ { label, objectURL } ],   ← objectURL replaces mock `color`
+ *     stages: [ { label, objectURL } ],   <- objectURL replaces mock `color`
  *     dialoguefold, dialoguewinhand, dialoguewinfinal, handdialogue
  *   }
  *
- * Object URLs are created with URL.createObjectURL() and should be revoked
- * when the scene is no longer needed (call GalleryLoader.revokeAll()).
+ * Call GalleryLoader.revokeAll() when scenes are no longer needed.
  */
 
-const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif']);
-const JSON_NAMES = new Set(['scene.json', 'meta.json', 'info.json']);
+var IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif'];
+var JSON_NAMES = ['scene.json', 'meta.json', 'info.json'];
 
 /**
  * Open a directory picker and return normalised scene data.
@@ -47,7 +36,7 @@ const JSON_NAMES = new Set(['scene.json', 'meta.json', 'info.json']);
  * @returns {Promise<Array>}
  */
 export async function pickAndLoadGallery() {
-  let dirHandle;
+  var dirHandle;
   try {
     dirHandle = await window.showDirectoryPicker({ mode: 'read' });
   } catch (e) {
@@ -57,12 +46,12 @@ export async function pickAndLoadGallery() {
   return _loadFromDirectoryHandle(dirHandle);
 }
 
-// Keep track of all created object URLs so we can revoke them later.
-const _activeURLs = [];
+// Track created object URLs so we can revoke them to free memory.
+var _activeURLs = [];
 
-/** Revoke all object URLs created by this loader to free memory. */
+/** Revoke all object URLs created by this loader. */
 export function revokeAll() {
-  _activeURLs.forEach(url => URL.revokeObjectURL(url));
+  _activeURLs.forEach(function(url) { URL.revokeObjectURL(url); });
   _activeURLs.length = 0;
 }
 
@@ -71,68 +60,68 @@ export function revokeAll() {
 // ---------------------------------------------------------------------------
 
 async function _loadFromDirectoryHandle(parentHandle) {
-  const scenes = [];
+  var scenes = [];
+  var entries = await _collectEntries(parentHandle);
 
-  for await (const [name, handle] of parentHandle.entries()) {
-    if (handle.kind !== 'directory') continue;
-    // Skip hidden folders (e.g. .DS_Store dirs)
-    if (name.startsWith('.')) continue;
+  for (var i = 0; i < entries.length; i++) {
+    var entry = entries[i];
+    if (entry.handle.kind !== 'directory') continue;
+    if (entry.name.startsWith('.')) continue;
 
-    const scene = await _loadSceneFolder(name, handle);
+    var scene = await _loadSceneFolder(entry.name, entry.handle);
     if (scene) scenes.push(scene);
   }
 
-  // Sort scenes alphabetically by folder name so order is predictable.
-  scenes.sort((a, b) => a.id.localeCompare(b.id));
+  scenes.sort(function(a, b) { return a.id.localeCompare(b.id); });
   return scenes;
 }
 
 async function _loadSceneFolder(folderName, dirHandle) {
-  // Parse "Jane - Bedroom" → name: "Jane", location: "Bedroom"
-  const dashIndex = folderName.indexOf(' - ');
-  const name     = dashIndex >= 0 ? folderName.slice(0, dashIndex).trim()  : folderName;
-  const location = dashIndex >= 0 ? folderName.slice(dashIndex + 3).trim() : '';
+  var dashIndex = folderName.indexOf(' - ');
+  var name      = dashIndex >= 0 ? folderName.slice(0, dashIndex).trim()  : folderName;
+  var location  = dashIndex >= 0 ? folderName.slice(dashIndex + 3).trim() : '';
 
-  let meta = {};
-  const stageFolders = [];
+  var meta         = {};
+  var stageFolders = [];
+  var entries      = await _collectEntries(dirHandle);
 
-  for await (const [entryName, entryHandle] of dirHandle.entries()) {
-    if (entryHandle.kind === 'file') {
-      if (JSON_NAMES.has(entryName.toLowerCase())) {
-        meta = await _readJson(entryHandle);
+  for (var i = 0; i < entries.length; i++) {
+    var entry = entries[i];
+    if (entry.handle.kind === 'file') {
+      if (JSON_NAMES.indexOf(entry.name.toLowerCase()) !== -1) {
+        meta = await _readJson(entry.handle);
       }
-    } else if (entryHandle.kind === 'directory' && !entryName.startsWith('.')) {
-      stageFolders.push({ name: entryName, handle: entryHandle });
+    } else if (entry.handle.kind === 'directory' && !entry.name.startsWith('.')) {
+      stageFolders.push({ name: entry.name, handle: entry.handle });
     }
   }
 
-  if (stageFolders.length === 0) return null; // skip empty folders
+  if (stageFolders.length === 0) return null;
 
-  // Sort stage folders by name (numeric-aware sort handles 01, 02 … 10+)
-  stageFolders.sort((a, b) =>
-    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
-  );
+  stageFolders.sort(function(a, b) {
+    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+  });
 
-  const stages = [];
-  for (const { name: stageName, handle: stageHandle } of stageFolders) {
-    const imgFile = await _findFirstImage(stageHandle);
+  var stages = [];
+  for (var j = 0; j < stageFolders.length; j++) {
+    var sf     = stageFolders[j];
+    var imgFile = await _findFirstImage(sf.handle);
     if (!imgFile) continue;
-    const blob = await imgFile.getFile();
-    const url  = URL.createObjectURL(blob);
+    var blob = await imgFile.getFile();
+    var url  = URL.createObjectURL(blob);
     _activeURLs.push(url);
-    stages.push({ label: stageName, objectURL: url });
+    stages.push({ label: sf.name, objectURL: url });
   }
 
   if (stages.length === 0) return null;
 
   return {
-    id:         folderName.toLowerCase().replace(/\s+/g, '-'),
-    name,
-    location,
-    bio:        meta.bio        || '',
-    nationality:meta.nationality|| '',
-    stages,
-    // Dialogue arrays — fall back to empty arrays so DialogueManager stays safe.
+    id:           folderName.toLowerCase().replace(/\s+/g, '-'),
+    name:         name,
+    location:     location,
+    bio:          meta.bio         || '',
+    nationality:  meta.nationality || '',
+    stages:       stages,
     dialoguefold:     meta.dialoguefold     || [],
     dialoguewinhand:  meta.dialoguewinhand  || [],
     dialoguewinfinal: meta.dialoguewinfinal || [],
@@ -140,26 +129,36 @@ async function _loadSceneFolder(folderName, dirHandle) {
   };
 }
 
+/** Collect all entries in a directory handle as a plain array. */
+async function _collectEntries(dirHandle) {
+  var result = [];
+  for await (var pair of dirHandle.entries()) {
+    result.push({ name: pair[0], handle: pair[1] });
+  }
+  return result;
+}
+
 /** Return the FileSystemFileHandle for the first image in a folder, or null. */
 async function _findFirstImage(dirHandle) {
-  const entries = [];
-  for await (const [ename, ehandle] of dirHandle.entries()) {
-    if (ehandle.kind === 'file') {
-      const ext = ename.split('.').pop().toLowerCase();
-      if (IMAGE_EXTS.has(ext)) entries.push({ name: ename, handle: ehandle });
-    }
-  }
-  if (entries.length === 0) return null;
-  entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-  return entries[0].handle;
+  var entries = await _collectEntries(dirHandle);
+  var images  = entries.filter(function(e) {
+    if (e.handle.kind !== 'file') return false;
+    var ext = e.name.split('.').pop().toLowerCase();
+    return IMAGE_EXTS.indexOf(ext) !== -1;
+  });
+  if (images.length === 0) return null;
+  images.sort(function(a, b) {
+    return a.name.localeCompare(b.name, undefined, { numeric: true });
+  });
+  return images[0].handle;
 }
 
 async function _readJson(fileHandle) {
   try {
-    const file = await fileHandle.getFile();
-    const text = await file.text();
+    var file = await fileHandle.getFile();
+    var text = await file.text();
     return JSON.parse(text);
-  } catch {
+  } catch (e) {
     return {};
   }
 }

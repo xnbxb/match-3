@@ -1,14 +1,14 @@
 /**
  * SidePanel.js
  * ------------
- * Draws and updates the right-side character/scene panel.
+ * Right-side character/scene panel.
  *
  * PORTRAIT RENDERING
  *   - If the current stage has an `objectURL` (real image from GalleryLoader),
- *     a Phaser Image is displayed and swapped on stage advance.
- *   - If only a `color` exists (mock data), falls back to the coloured rectangle.
+ *     a Phaser Image is displayed and crossfaded on stage advance.
+ *   - If only a `color` exists (mock data), falls back to a coloured rectangle.
  *
- * Layout constants are at the top — change them to reposition everything.
+ * All layout constants are at the top — change them to reposition everything.
  */
 
 export const PANEL_X      = 370;
@@ -16,19 +16,17 @@ export const PANEL_WIDTH  = 520;
 export const PANEL_HEIGHT = 640;
 export const PANEL_PAD    = 20;
 
-const PORTRAIT_HEIGHT    = 300;
-const NAME_Y             = PORTRAIT_HEIGHT + 18;
-const BIO_Y              = NAME_Y + 28;
-const DIVIDER_Y          = BIO_Y + 46;
-const PROGRESS_Y         = DIVIDER_Y + 18;
-const PROGRESS_BAR_HEIGHT= 12;
-const STAGE_LABEL_Y      = PROGRESS_Y + PROGRESS_BAR_HEIGHT + 10;
-const DIALOGUE_Y         = STAGE_LABEL_Y + 32;
-const DIALOGUE_HEIGHT    = 110;
+const PORTRAIT_HEIGHT     = 300;
+const NAME_Y              = PORTRAIT_HEIGHT + 18;
+const BIO_Y               = NAME_Y + 28;
+const DIVIDER_Y           = BIO_Y + 46;
+const PROGRESS_Y          = DIVIDER_Y + 18;
+const PROGRESS_BAR_HEIGHT = 12;
+const STAGE_LABEL_Y       = PROGRESS_Y + PROGRESS_BAR_HEIGHT + 10;
+const DIALOGUE_Y          = STAGE_LABEL_Y + 32;
+const DIALOGUE_HEIGHT     = 110;
 
-// Palette
 const COLOR_PANEL_BG      = 0x1a1a2e;
-const COLOR_PORTRAIT_BG   = 0x2a2a4a;
 const COLOR_DIVIDER       = 0x333355;
 const COLOR_PROGRESS_BG   = 0x2a2a4a;
 const COLOR_PROGRESS_FILL = 0xc96f84;
@@ -47,18 +45,15 @@ export default class SidePanel {
     this.scene           = scene;
     this.sceneData       = sceneData;
     this.progressManager = progressManager;
-
-    // Track the currently displayed portrait image object, if any.
-    this._portraitImage = null;
+    this._portraitImage  = null;  // currently displayed Phaser Image, if any
 
     this._buildPanel();
     this._buildPanelEntrance();
     this.refresh();
   }
 
-  // ── Public API ──────────────────────────────────────────────────────────
+  // ── Public API ────────────────────────────────────────────────────────────
 
-  /** Fade in a new dialogue line. */
   showDialogue(text) {
     this._dialogueText.setText(`"${text}"`);
     this._dialogueText.setAlpha(0);
@@ -70,7 +65,6 @@ export default class SidePanel {
     });
   }
 
-  /** Redraw portrait + progress bar for the current stage. */
   refresh() {
     const stageData   = this.progressManager.getCurrentStageData();
     const progress    = this.progressManager.getProgressToNextStage();
@@ -92,7 +86,6 @@ export default class SidePanel {
     );
   }
 
-  /** Hot-swap to a new scene without rebuilding the panel. */
   loadScene(newSceneData) {
     this.sceneData = newSceneData;
     this._nameText.setText(`${newSceneData.name}  ·  ${newSceneData.location}`);
@@ -100,12 +93,11 @@ export default class SidePanel {
     this.refresh();
   }
 
-  /** Update stage dots to show which stages are unlocked. */
   refreshStageDots() {
-    const current     = this.progressManager.currentStage;
-    const dotCount    = this.progressManager.totalStages;
-    const dotSpacing  = 18;
-    const dotsStartX  = PANEL_X + PANEL_WIDTH / 2 - ((dotCount - 1) * dotSpacing) / 2;
+    const current    = this.progressManager.currentStage;
+    const dotCount   = this.progressManager.totalStages;
+    const dotSpacing = 18;
+    const dotsStartX = PANEL_X + PANEL_WIDTH / 2 - ((dotCount - 1) * dotSpacing) / 2;
     this._stageDots.forEach((dot, i) => {
       dot.clear();
       dot.fillStyle(0xffffff, i <= current ? 1 : 0.3);
@@ -113,60 +105,50 @@ export default class SidePanel {
     });
   }
 
-  // ── Private ─────────────────────────────────────────────────────────────
+  // ── Private ───────────────────────────────────────────────────────────────
 
-  /**
-   * Show a real image if the stage has objectURL; otherwise show colour rect.
-   * Handles both the initial draw and subsequent stage-advance swaps.
-   */
   _refreshPortrait(stageData) {
-    const px  = PANEL_X + PANEL_PAD;
-    const py  = PANEL_PAD;
-    const pw  = PANEL_WIDTH - PANEL_PAD * 2;
-    const ph  = PORTRAIT_HEIGHT;
+    const px = PANEL_X + PANEL_PAD;
+    const py = PANEL_PAD;
+    const pw = PANEL_WIDTH - PANEL_PAD * 2;
+    const ph = PORTRAIT_HEIGHT;
 
     if (stageData.objectURL) {
-      // ── Real image path ──────────────────────────────────────────────────
-      const textureKey = `portrait_stage_${this.progressManager.currentStage}_${this.sceneData.id}`;
+      const textureKey = `portrait_${this.progressManager.currentStage}_${this.sceneData.id}`;
 
-      const _applyImage = () => {
-        // Destroy old portrait image if there was one
+      const applyImage = () => {
         if (this._portraitImage) {
           this._portraitImage.destroy();
           this._portraitImage = null;
         }
-        // Clear the fallback colour rect
         this._portraitBg.clear();
 
         const img = this.scene.add.image(px + pw / 2, py + ph / 2, textureKey);
-        // Scale to fill the portrait area while preserving aspect ratio
         const scaleX = pw / img.width;
         const scaleY = ph / img.height;
         img.setScale(Math.max(scaleX, scaleY));
-        // Crop to bounds using a mask
+
+        // Rounded rectangle mask so image respects border-radius
         const maskShape = this.scene.make.graphics({ add: false });
         maskShape.fillStyle(0xffffff);
         maskShape.fillRoundedRect(px, py, pw, ph, 8);
         img.setMask(maskShape.createGeometryMask());
 
         img.setAlpha(0);
-        this.scene.tweens.add({
-          targets: img, alpha: 1, duration: 500, ease: 'Sine.easeIn'
-        });
+        this.scene.tweens.add({ targets: img, alpha: 1, duration: 500, ease: 'Sine.easeIn' });
         this._portraitImage = img;
       };
 
       if (this.scene.textures.exists(textureKey)) {
-        _applyImage();
+        applyImage();
       } else {
-        // Load texture from object URL on the fly.
         this.scene.load.image(textureKey, stageData.objectURL);
-        this.scene.load.once('complete', _applyImage);
+        this.scene.load.once('complete', applyImage);
         this.scene.load.start();
       }
 
     } else {
-      // ── Fallback: coloured rectangle (mock data) ──────────────────────────
+      // Fallback: coloured rectangle (mock data)
       if (this._portraitImage) {
         this._portraitImage.destroy();
         this._portraitImage = null;
@@ -178,19 +160,11 @@ export default class SidePanel {
     }
   }
 
-  /** Slide the whole panel in from the right on first creation. */
   _buildPanelEntrance() {
-    // We can't tween Phaser graphics containers easily, so we tween alpha
-    // on the text elements that sit inside the panel instead.
-    const targets = [
-      this._nameText,
-      this._bioText,
-      this._stageLabel,
-      this._dialogueText
-    ];
+    const targets = [this._nameText, this._bioText, this._stageLabel, this._dialogueText];
     targets.forEach(t => t.setAlpha(0));
     this.scene.tweens.add({
-      targets,
+      targets:  targets,
       alpha:    1,
       duration: 700,
       delay:    this.scene.tweens.stagger(80),
@@ -206,25 +180,21 @@ export default class SidePanel {
     const pad = PANEL_PAD;
 
     // Panel background
-    const bg = s.add.graphics();
-    bg.fillStyle(COLOR_PANEL_BG, 1);
-    bg.fillRect(px, 0, pw, ph);
+    s.add.graphics().fillStyle(COLOR_PANEL_BG, 1).fillRect(px, 0, pw, ph);
 
-    // Left-edge accent line
-    s.add.graphics()
-      .fillStyle(COLOR_PROGRESS_FILL, 0.6)
-      .fillRect(px, 0, 2, ph);
+    // Left-edge accent stripe
+    s.add.graphics().fillStyle(COLOR_PROGRESS_FILL, 0.6).fillRect(px, 0, 2, ph);
 
-    // Portrait placeholder background (graphics, replaced on refresh)
+    // Portrait placeholder (graphics; replaced by real image when available)
     this._portraitBg = s.add.graphics();
 
-    // Portrait overlay vignette (static, drawn on top of image)
+    // Portrait vignette overlay (static dark tint on top of image)
     s.add.graphics()
       .fillStyle(0x000000, 0.18)
       .fillRoundedRect(px + pad, pad, pw - pad * 2, PORTRAIT_HEIGHT, 8);
 
-    // Stage indicator dots
-    this._stageDots = [];
+    // Stage dots
+    this._stageDots  = [];
     const dotCount   = this.progressManager.totalStages;
     const dotSpacing = 18;
     const dotsStartX = px + pw / 2 - ((dotCount - 1) * dotSpacing) / 2;
@@ -251,8 +221,7 @@ export default class SidePanel {
     );
 
     // Divider
-    s.add.graphics().fillStyle(COLOR_DIVIDER, 1)
-      .fillRect(px + pad, DIVIDER_Y, pw - pad * 2, 1);
+    s.add.graphics().fillStyle(COLOR_DIVIDER, 1).fillRect(px + pad, DIVIDER_Y, pw - pad * 2, 1);
 
     // Progress bar background
     s.add.graphics().fillStyle(COLOR_PROGRESS_BG, 1)
@@ -275,8 +244,10 @@ export default class SidePanel {
       .strokeRoundedRect(px + pad, DIALOGUE_Y, pw - pad * 2, DIALOGUE_HEIGHT, 8);
 
     s.add.text(px + pad + 10, DIALOGUE_Y + 10, 'SHE SAYS', {
-      fontFamily: 'Arial, sans-serif', fontSize: '9px',
-      color: COLOR_TEXT_ACCENT, letterSpacing: 2
+      fontFamily:    'Arial, sans-serif',
+      fontSize:      '9px',
+      color:         COLOR_TEXT_ACCENT,
+      letterSpacing: 2
     });
 
     this._dialogueText = s.add.text(
